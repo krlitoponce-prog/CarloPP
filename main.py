@@ -1,8 +1,10 @@
 import sqlite3
-import requests
 import pandas as pd
+import requests
 from datetime import datetime
+import time
 
+# --- CONFIGURACIÓN Y BASE DE DATOS ---
 class SistemaPrediccionFutbol:
     def __init__(self, db_name='predicciones_futbol.db'):
         self.db_name = db_name
@@ -12,25 +14,24 @@ class SistemaPrediccionFutbol:
         self.inicializar_db()
 
     def inicializar_db(self):
-        """Crea las tablas necesarias para el modelo avanzado."""
+        """Inicializa las tablas. Nota: sqlite3 no requiere instalación por pip."""
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         
         # Tabla de Equipos
-        cursor.execute('''CREATE TABLE IF NOT EXISTS equipos 
-            (id_equipo INTEGER PRIMARY KEY, nombre TEXT, ciudad TEXT, elo_actual REAL)''')
+        cursor.execute('CREATE TABLE IF NOT EXISTS equipos (id_equipo INTEGER PRIMARY KEY, nombre TEXT, elo_actual REAL)')
 
-        # Tabla de Jugadores con Atributos Técnicos
+        # Tabla de Jugadores Estrella y Atributos
         cursor.execute('''CREATE TABLE IF NOT EXISTS jugadores (
             id_jugador INTEGER PRIMARY KEY,
             nombre TEXT,
             posicion TEXT,
-            score_aereo REAL DEFAULT 5.0,
-            score_pies REAL DEFAULT 5.0,
-            importancia_estrella REAL DEFAULT 1.0
+            score_aereo REAL,
+            score_pies REAL,
+            importancia_estrella REAL
         )''')
 
-        # Tabla de Partidos e Indicadores de Rendimiento
+        # Tabla de Partidos con Variables de Control (Fatiga, Bajas, Cuotas)
         cursor.execute('''CREATE TABLE IF NOT EXISTS partidos (
             id_partido INTEGER PRIMARY KEY,
             fecha DATE,
@@ -43,45 +44,71 @@ class SistemaPrediccionFutbol:
             cuota_local REAL,
             cuota_visitante REAL,
             descanso_local_dias INTEGER,
-            descanso_visitante_dias INTEGER,
-            ausencias_estrella_local INTEGER, -- Conteo de bajas clave
-            ausencias_estrella_visitante INTEGER,
-            FOREIGN KEY(local_id) REFERENCES equipos(id_equipo),
-            FOREIGN KEY(visitante_id) REFERENCES equipos(id_equipo)
+            bajas_clave_local INTEGER, 
+            bajas_clave_visitante INTEGER
         )''')
         
         conn.commit()
         conn.close()
-        print("✅ Base de Datos y Tablas preparadas.")
+        print("✅ Sistema listo: Base de Datos configurada.")
 
-    def calcular_fatiga(self, equipo_id, fecha_actual):
-        """Calcula los días de descanso desde el último partido en la DB."""
-        conn = sqlite3.connect(self.db_name)
-        query = f"""SELECT fecha FROM partidos 
-                    WHERE local_id = {equipo_id} OR visitante_id = {equipo_id} 
-                    ORDER BY fecha DESC LIMIT 1"""
-        last_match = pd.read_sql(query, conn)
-        conn.close()
+    # --- MÓDULO DE BAJAS Y LESIONES ---
+    def obtener_bajas_sofascore(self, match_id):
+        """
+        Simula la extracción de bajas desde la API de SofaScore.
+        Busca jugadores con estado 'missing' o 'doubtful'.
+        """
+        # En una implementación real, aquí haríamos el request a /event/{match_id}/lineups
+        # Por ahora, definimos la lógica de impacto:
+        print(f"🔍 Analizando bajas para el partido ID: {match_id}...")
         
-        if not last_match.empty:
-            delta = datetime.strptime(fecha_actual, '%Y-%m-%d') - datetime.strptime(last_match['fecha'][0], '%Y-%m-%d')
-            return delta.days
-        return 7  # Por defecto si no hay registro anterior
+        # Ejemplo de retorno de datos procesados
+        bajas_detectadas = {
+            'local': [{'nombre': 'Kevin De Bruyne', 'rol': 'Motor', 'impacto': 0.85}],
+            'visitante': [{'nombre': 'Virgil van Dijk', 'rol': 'Muro', 'impacto': 1.20}]
+        }
+        return bajas_detectadas
 
-    def obtener_elo_historico(self, equipo_nombre, fecha):
-        """Conecta con ClubElo para obtener el poder del equipo en una fecha dada."""
-        # Nota: ClubElo API devuelve el Elo actual, para histórico se requiere scraping de su CSV
-        url = f"http://api.clubelo.com/{equipo_nombre}"
-        # Lógica simplificada para el ejemplo
-        return 1500.0 
-
-    def analizar_impacto_bajas(self, alineacion_actual, id_equipo):
+    # --- MÓDULO DE CÁLCULO DE VALOR (VALUE BETTING) ---
+    def calcular_probabilidad_ajustada(self, prob_base, bajas):
         """
-        Compara la alineación contra el 'Core' histórico.
-        Si falta un jugador con importancia_estrella > 1.5, penaliza el rendimiento.
+        Ajusta la probabilidad de victoria según las bajas detectadas.
         """
-        # Aquí iría la lógica de comparación de IDs de jugadores
-        pass
+        ajuste = 1.0
+        for baja in bajas['local']:
+            ajuste *= baja['impacto'] # Si es mediocentro creativo, baja la prob. de anotar
+        
+        return round(prob_base * ajuste, 2)
 
-# --- INSTANCIACIÓN Y PRUEBA ---
-sistema = SistemaPrediccionFutbol()
+    def detectar_valor(self, prob_nuestra, cuota_casa):
+        """Fórmula de Value Betting: (Prob * Cuota) - 1"""
+        valor = (prob_nuestra * cuota_casa) - 1
+        return round(valor * 100, 2)
+
+    # --- MOTOR DE INGESTA (3 TEMPORADAS) ---
+    def ejecutar_scraper_historico(self):
+        print("🚀 Iniciando descarga de las últimas 3 temporadas de la Premier League...")
+        # Aquí se integraría el loop de las temporadas 23/24, 24/25 y 25/26
+        time.sleep(1)
+        print("📊 Procesando 1,140 partidos potenciales...")
+
+# --- EJECUCIÓN DEL PROTOTIPO ---
+if __name__ == "__main__":
+    sistema = SistemaPrediccionFutbol()
+    
+    # Prueba de concepto con un partido
+    bajas = sistema.obtener_bajas_sofascore(match_id=12345)
+    
+    # Si nuestra probabilidad base era 60% (0.60)
+    prob_final = sistema.calcular_probabilidad_ajustada(0.60, bajas)
+    
+    # Si la casa paga 1.90
+    valor = sistema.detectar_valor(prob_final, 1.90)
+    
+    print(f"\n--- REPORTE DE PREDICCIÓN ---")
+    print(f"Probabilidad Ajustada por Bajas: {prob_final * 100}%")
+    print(f"Valor Estimado en la Apuesta: {valor}%")
+    if valor > 0:
+        print("✅ Recomendación: Apostar (Valor positivo)")
+    else:
+        print("❌ Recomendación: No apostar (Sin ventaja)")
